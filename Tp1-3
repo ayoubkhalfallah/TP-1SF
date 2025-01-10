@@ -1,0 +1,266 @@
+from ply import lex, yacc
+
+
+class UseCaseDiagram:
+    """Représente un diagramme global des cas d'utilisation."""
+
+    def __init__(self, name=None):
+        self.name = name
+        self.packages = []  # Liste de packages ou éléments au niveau racine
+        self.links = []     # Liens entre les éléments (inter-packages)
+
+    def add_package(self, package):
+        self.packages.append(package)
+
+    def add_link(self, link):
+        self.links.append(link)
+
+    def __repr__(self):
+        return f"UseCaseDiagram(name={self.name}, packages={self.packages}, links={self.links})"
+
+
+class Package:
+    """Représente un package."""
+
+    def __init__(self, name):
+        self.name = name
+        self.actors = []
+        self.use_cases = []
+        self.sub_packages = []
+
+    def add_actor(self, actor):
+        self.actors.append(actor)
+
+    def add_use_case(self, use_case):
+        self.use_cases.append(use_case)
+
+    def add_sub_package(self, package):
+        self.sub_packages.append(package)
+
+    def __repr__(self):
+        return f"Package(name={self.name}, actors={self.actors}, use_cases={self.use_cases}, sub_packages={self.sub_packages})"
+
+
+class Actor:
+    """Représente un acteur."""
+
+    def __init__(self, name, alias=None, stereotype=None):
+        self.name = name
+        self.alias = alias
+        self.stereotype = stereotype
+
+    def __repr__(self):
+        return f"Actor(name={self.name}, alias={self.alias}, stereotype={self.stereotype})"
+
+
+class UseCase:
+    """Représente un cas d'utilisation."""
+
+    def __init__(self, name, alias=None, stereotype=None):
+        self.name = name
+        self.alias = alias
+        self.stereotype = stereotype
+
+    def __repr__(self):
+        return f"UseCase(name={self.name}, alias={self.alias}, stereotype={self.stereotype})"
+
+
+class Link:
+    """Représente un lien entre deux éléments."""
+
+    def __init__(self, source, target, link_type, label=None):
+        self.source = source
+        self.target = target
+        self.link_type = link_type  # Types : "includes", "extends", "inherit", "arrow"
+        self.label = label
+
+    def __repr__(self):
+        return f"Link(source={self.source}, target={self.target}, link_type={self.link_type}, label={self.label})"
+
+
+# Définition des tokens
+tokens = (
+    "STARTUML", "ENDUML", "COLON", "RIGHT_ARROW_1", "RIGHT_ARROW_2", "ACTOR", "ID", "AS", "USECASE", "STRING",
+    "PACKAGE", "LBRACE", "RBRACE", "INHERIT", "STEREO", "INCLUDES", "EXTENDS", "ACTOR_TXT", "USE_CASE_TXT", "EOL"
+)
+
+reserved = {"actor": "ACTOR", "as": "AS", "usecase": "USECASE",
+            "package": "PACKAGE", "includes": "INCLUDES", "extends": "EXTENDS"}
+
+t_STARTUML = "@startuml"
+t_ENDUML = "@enduml"
+t_COLON = ":"
+t_RIGHT_ARROW_1 = "-+>"
+t_RIGHT_ARROW_2 = r"\.+>"
+t_LBRACE = r"\{"
+t_RBRACE = r"\}"
+t_INHERIT = r"<\|--"
+t_EOL = r"\n"
+
+
+def t_STRING(t):
+    r'"[^"]*"'
+    t.value = t.value[1:-1]
+    return t
+
+
+def t_STEREO(t):
+    r"<<[a-zA-Z_][a-zA-Z_0-9]*>>"
+    t.value = t.value[2:-2]
+    return t
+
+
+def t_ID(t):
+    r"[a-zA-Z_][a-zA-Z_0-9]*"
+    if t.value in reserved.keys():
+        t.type = reserved[t.value]
+    return t
+
+
+def t_ACTOR_TXT(t):
+    ":[^ :\n][^\n:]*:"
+    t.value = t.value[1:-1]
+    return t
+
+
+def t_USE_CASE_TXT(t):
+    r"\([^ \(\n][^)\n:]*\)"
+    t.value = t.value[1:-1]
+    return t
+
+
+t_ignore = " \t"
+
+
+def t_error(t):
+    raise ValueError(f"Unexpected symbol {t}")
+
+
+lexer = lex.lex()
+
+
+def p_start(p):
+    """start : eols STARTUML name EOL defs ENDUML eols
+    """
+    p[0] = UseCaseDiagram(name=p[3])
+
+
+def p_eols(p):
+    """eols : EOL eols
+            | empty"""
+    if len(p) == 3:
+        p[0] = p[1]
+    else:
+        p[0] = p[1]
+
+
+def p_name(p):
+    """name : ID
+    |
+    """
+    p[0] = p[1] if len(p) > 1 else None
+
+
+def p_defs(p):
+    """defs : one_def  EOL
+        | defs one_def EOL
+    """
+    if len(p) == 3:
+        p[0] = [p[1]]
+    else:
+        p[0] = p[1] + [p[2]]
+
+
+def p_one_def(p):
+    """one_def : ACTOR def_act alias stereo
+    | USECASE def_uc alias stereo
+    | var arrow var ucl_link
+    | var INHERIT var
+    | PACKAGE ID LBRACE defs RBRACE
+    """
+    if p[1] == 'actor':
+        p[0] = Actor(p[2], alias=p[3], stereotype=p[4])
+    elif p[1] == 'usecase':
+        p[0] = UseCase(p[2], alias=p[3], stereotype=p[4])
+
+
+def p_stereo(p):
+    """stereo : STEREO
+    |
+    """
+    p[0] = p[1] if len(p) > 1 else None
+
+
+def p_def_act(p):
+    """def_act : ID
+    | ACTOR_TXT
+    | STRING
+    """
+    p[0] = p[1]
+
+
+def p_def_uc(p):
+    """def_uc : ID
+    | USE_CASE_TXT
+    | STRING
+    """
+    p[0] = p[1]
+
+
+def p_ucl_link(p):
+    """ucl_link : COLON EXTENDS
+    | COLON INCLUDES
+    | COLON ID
+    |
+    """
+    p[0] = p[2] if len(p) > 1 else None
+
+
+def p_arrow(p):
+    """arrow : RIGHT_ARROW_1
+    | RIGHT_ARROW_2
+    """
+    p[0] = p[1]
+
+
+def p_var(p):
+    """var : ID
+    | USE_CASE_TXT
+    | ACTOR_TXT
+    """
+    p[0] = p[1]
+
+
+def p_alias(p):
+    """alias : AS ID
+    |
+    """
+    p[0] = p[2] if len(p) > 1 else None
+
+
+def p_error(p):
+    print(f"Syntax error {p}")
+
+
+parser = yacc.yacc()
+
+lexer.input("""
+actor :System:
+actor :User:
+usecase (Define travel)
+usecase (Set VIP options)
+usecase (Authentication)
+:User: --> (Define travel)
+:User: --> (Set VIP options)
+(Define travel) --> (Authentication) : includes
+(Set VIP options) --> (Define travel) : extends
+package Administration {
+actor :Admin:
+:User: <|-- :Admin:
+usecase (Remove travel)
+:Admin: --> (Remove travel)
+(Remove travel) --> (Authentication) : includes
+}
+""")
+
+print(parser.parse())
